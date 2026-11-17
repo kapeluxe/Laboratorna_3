@@ -1,0 +1,477 @@
+#include <iostream>
+#include <vector>
+#include <string>
+#include <sstream>
+#include <iomanip>
+#include <cmath>
+#include <algorithm>
+#include <unordered_set>
+#include <random>
+#include <limits>
+#include <omp.h>
+
+#ifdef _WIN32
+#include <Windows.h>
+#endif
+
+const int INF = 100000000;
+using Matrix = std::vector<std::vector<int>>;
+
+struct FloydResult {
+    double totalTimeMs = 0.0;
+    std::vector<double> threadTimesMs;
+    Matrix dist;
+    Matrix next;
+};
+
+// ВАЛІДАЦІЯ ВВОДУ
+
+int ReadInt(const std::string& prompt, int minVal, int maxVal) {
+    int value;
+    while (true) {
+        std::cout << prompt;
+        if (std::cin >> value && value >= minVal && value <= maxVal) {
+            std::cin.ignore((std::numeric_limits<std::streamsize>::max)(), '\n');
+            return value;
+        }
+        std::cout << "Помилка вводу! Введіть ціле число в межах ["
+            << minVal << " .. " << maxVal << "].\n";
+        std::cin.clear();
+        std::cin.ignore((std::numeric_limits<std::streamsize>::max)(), '\n');
+    }
+}
+
+// ЗАВДАННЯ 1. ОБЧИСЛЕННЯ ПОЛІНОМА (ВАРІАНТ 10, ДОДАТОК 1)
+
+inline double EvalPolyVariant10(double a) {
+    double a2 = a * a;
+    double a3 = a2 * a;
+    double a4 = a2 * a2;
+    double a5 = a4 * a;
+    return -0.0005 * a5 + 0.01 * a4 - 0.08 * a3 + 0.3 * a2 - 0.7 * a + 1.5;
+}
+
+double PolySequential(const std::vector<double>& A, const std::vector<double>& B, std::vector<double>& C) {
+    int n = static_cast<int>(A.size());
+    (void)B;
+    double start = omp_get_wtime();
+    for (int i = 0; i < n; ++i) {
+        C[i] = EvalPolyVariant10(A[i]);
+    }
+    double end = omp_get_wtime();
+    return (end - start) * 1000.0;
+}
+
+double PolyParallel(const std::vector<double>& A, const std::vector<double>& B, std::vector<double>& C, int threads) {
+    int n = static_cast<int>(A.size());
+    (void)B;
+    omp_set_dynamic(0);
+
+    double start = omp_get_wtime();
+#pragma omp parallel for num_threads(threads) schedule(static)
+    for (int i = 0; i < n; ++i) {
+        C[i] = EvalPolyVariant10(A[i]);
+    }
+    double end = omp_get_wtime();
+    return (end - start) * 1000.0;
+}
+
+void RunPolyExperiment(int n) {
+    std::cout << "\n====================================================================\n";
+    std::cout << " ЗАВДАННЯ 1 (ВАРІАНТ 10) | РОЗМІР МАСИВІВ N = " << n << "\n";
+    std::cout << "====================================================================\n";
+
+    std::vector<double> A(n), B(n), C_seq(n), C_par4(n), C_par8(n);
+    std::mt19937 gen(42);
+    std::uniform_real_distribution<double> dist(-10.0, 10.0);
+
+    for (int i = 0; i < n; ++i) {
+        A[i] = dist(gen);
+        B[i] = dist(gen);
+    }
+
+    // прогрів кешу
+    PolySequential(A, B, C_seq);
+
+    double tSeq = PolySequential(A, B, C_seq);
+    double tPar4 = PolyParallel(A, B, C_par4, 4);
+    double tPar8 = PolyParallel(A, B, C_par8, 8);
+
+    bool ok4 = true, ok8 = true;
+    for (int i = 0; i < n; ++i) {
+        if (std::fabs(C_seq[i] - C_par4[i]) > 1e-12) ok4 = false;
+        if (std::fabs(C_seq[i] - C_par8[i]) > 1e-12) ok8 = false;
+    }
+
+    std::cout << std::fixed << std::setprecision(4);
+    std::cout << std::left << std::setw(28) << "Режим виконання"
+        << std::setw(16) << "Час (мс)"
+        << std::setw(16) << "Прискорення"
+        << "Коректність\n";
+    std::cout << "--------------------------------------------------------------------\n";
+    std::cout << std::left << std::setw(28) << "Послідовний (1 потік)"
+        << std::setw(16) << tSeq << std::setw(16) << "1.00x" << "Базовий\n";
+    std::cout << std::left << std::setw(28) << "Паралельний (4 потоки)"
+        << std::setw(16) << tPar4
+        << std::setw(16) << (std::to_string(tPar4 > 0 ? tSeq / tPar4 : 0.0).substr(0, 4) + "x")
+        << (ok4 ? "OK" : "ПОМИЛКА") << "\n";
+    std::cout << std::left << std::setw(28) << "Паралельний (8 потоків)"
+        << std::setw(16) << tPar8
+        << std::setw(16) << (std::to_string(tPar8 > 0 ? tSeq / tPar8 : 0.0).substr(0, 4) + "x")
+        << (ok8 ? "OK" : "ПОМИЛКА") << "\n";
+
+    std::cout << "\nКонтрольні значення: C[0] = " << C_seq[0]
+        << ", C[1] = " << C_seq[1] << ", C[2] = " << C_seq[2] << "\n";
+}
+
+void Task1Menu() {
+    while (true) {
+        std::cout << "\n--- ЗАВДАННЯ 1: ОБЧИСЛЕННЯ ПОЛІНОМА (ВАРІАНТ 10) ---\n";
+        std::cout << "1. Ввести розмірність N вручну (10 000 - 1 000 000)\n";
+        std::cout << "2. Провести серію замірів для звіту (N = 10 000, 100 000, 1 000 000)\n";
+        std::cout << "0. Назад у головне меню\n";
+
+        int ch = ReadInt("Ваш вибір: ", 0, 2);
+        if (ch == 0) break;
+        if (ch == 1) {
+            int n = ReadInt("Введіть N (10000 - 1000000): ", 10000, 1000000);
+            RunPolyExperiment(n);
+        }
+        else {
+            RunPolyExperiment(10000);
+            RunPolyExperiment(100000);
+            RunPolyExperiment(1000000);
+        }
+    }
+}
+
+// ЗАВДАННЯ 2. ПАРАЛЕЛЬНИЙ АЛГОРИТМ ФЛОЙДА-УОРШЕЛЛА (OPENMP)
+
+
+void PrintCostMatrix(const Matrix& mat) {
+    int n = static_cast<int>(mat.size());
+    std::cout << "      ";
+    for (int j = 0; j < n; ++j) std::cout << "[" << std::setw(2) << (j + 1) << "]  ";
+    std::cout << "\n";
+
+    for (int i = 0; i < n; ++i) {
+        std::cout << "[" << std::setw(2) << (i + 1) << "]  ";
+        for (int j = 0; j < n; ++j) {
+            if (mat[i][j] >= INF / 2) std::cout << " inf  ";
+            else std::cout << std::setw(4) << mat[i][j] << "  ";
+        }
+        std::cout << "\n";
+    }
+}
+
+void PrintNextMatrix(const Matrix& next) {
+    int n = static_cast<int>(next.size());
+    std::cout << "      ";
+    for (int j = 0; j < n; ++j) std::cout << "[" << std::setw(2) << (j + 1) << "]  ";
+    std::cout << "\n";
+
+    for (int i = 0; i < n; ++i) {
+        std::cout << "[" << std::setw(2) << (i + 1) << "]  ";
+        for (int j = 0; j < n; ++j) {
+            if (next[i][j] == -1) std::cout << "  -   ";
+            else std::cout << std::setw(4) << (next[i][j] + 1) << "  ";
+        }
+        std::cout << "\n";
+    }
+}
+
+void InitNext(const Matrix& dist, Matrix& next) {
+    int n = static_cast<int>(dist.size());
+    next.assign(n, std::vector<int>(n, -1));
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            if (i == j) next[i][j] = i;
+            else if (dist[i][j] < INF) next[i][j] = j;
+        }
+    }
+}
+
+FloydResult FloydSequential(const Matrix& initW) {
+    int n = static_cast<int>(initW.size());
+    FloydResult res;
+    res.dist = initW;
+    InitNext(res.dist, res.next);
+    res.threadTimesMs.resize(1, 0.0);
+
+    double start = omp_get_wtime();
+    for (int k = 0; k < n; ++k) {
+        for (int i = 0; i < n; ++i) {
+            if (res.dist[i][k] >= INF) continue;
+            for (int j = 0; j < n; ++j) {
+                if (res.dist[k][j] < INF && res.dist[i][k] + res.dist[k][j] < res.dist[i][j]) {
+                    res.dist[i][j] = res.dist[i][k] + res.dist[k][j];
+                    res.next[i][j] = res.next[i][k];
+                }
+            }
+        }
+    }
+    double end = omp_get_wtime();
+    res.totalTimeMs = (end - start) * 1000.0;
+    res.threadTimesMs[0] = res.totalTimeMs;
+    return res;
+}
+
+FloydResult FloydParallel(const Matrix& initW, int numThreads) {
+    int n = static_cast<int>(initW.size());
+    FloydResult res;
+    res.dist = initW;
+    InitNext(res.dist, res.next);
+    res.threadTimesMs.resize(numThreads, 0.0);
+
+    omp_set_dynamic(0);
+    double totalStart = omp_get_wtime();
+
+#pragma omp parallel num_threads(numThreads)
+    {
+        int tid = omp_get_thread_num();
+        double tStart = omp_get_wtime();
+
+        for (int k = 0; k < n; ++k) {
+#pragma omp for schedule(static)
+            for (int i = 0; i < n; ++i) {
+                if (res.dist[i][k] >= INF) continue;
+                for (int j = 0; j < n; ++j) {
+                    if (res.dist[k][j] < INF && res.dist[i][k] + res.dist[k][j] < res.dist[i][j]) {
+                        res.dist[i][j] = res.dist[i][k] + res.dist[k][j];
+                        res.next[i][j] = res.next[i][k];
+                    }
+                }
+            }
+        }
+
+        double tEnd = omp_get_wtime();
+        res.threadTimesMs[tid] = (tEnd - tStart) * 1000.0;
+    }
+
+    double totalEnd = omp_get_wtime();
+    res.totalTimeMs = (totalEnd - totalStart) * 1000.0;
+    return res;
+}
+
+void SearchPairPath(const Matrix& dist, const Matrix& next) {
+    int n = static_cast<int>(dist.size());
+    int u = ReadInt("Початкова вершина u (1 - " + std::to_string(n) + "): ", 1, n) - 1;
+    int v = ReadInt("Кінцева вершина v (1 - " + std::to_string(n) + "): ", 1, n) - 1;
+
+    if (u == v) {
+        std::cout << "Вершини збігаються. Мінімальна відстань = 0.\n";
+        return;
+    }
+    if (dist[u][v] >= INF / 2) {
+        std::cout << "Шлях між " << (u + 1) << " та " << (v + 1) << " ВІДСУТНІЙ (INF).\n";
+        return;
+    }
+
+    std::vector<int> path = { u };
+    std::unordered_set<int> visited = { u };
+    int curr = u;
+    bool cycle = false;
+
+    while (curr != v) {
+        curr = next[curr][v];
+        if (curr == -1) {
+            std::cout << "Помилка відновлення шляху.\n";
+            return;
+        }
+        if (visited.count(curr) && curr != v) {
+            cycle = true;
+            path.push_back(curr);
+            break;
+        }
+        visited.insert(curr);
+        path.push_back(curr);
+    }
+
+    std::cout << "\n[МАРШРУТ]: Відстань = " << dist[u][v] << " | Шлях: ";
+    for (size_t i = 0; i < path.size(); ++i) {
+        std::cout << (path[i] + 1) << (i + 1 < path.size() ? " -> " : "");
+    }
+    std::cout << "\n";
+    if (cycle) std::cout << "[УВАГА] Маршрут проходить через від'ємний цикл!\n";
+}
+
+void RunFloydWorkflow(const Matrix& initW, const std::string& title) {
+    int n = static_cast<int>(initW.size());
+    std::cout << "\n====================================================================\n";
+    std::cout << " АЛГОРИТМ ФЛОЙДА-УОРШЕЛЛА: " << title << " (" << n << " вершин)\n";
+    std::cout << "====================================================================\n";
+
+    if (n <= 15) {
+        std::cout << "\n[Вхідна матриця відстаней W]:\n";
+        PrintCostMatrix(initW);
+    }
+
+    FloydResult seq = FloydSequential(initW);
+    FloydResult par4 = FloydParallel(initW, 4);
+    FloydResult par8 = FloydParallel(initW, 8);
+
+    bool ok4 = (seq.dist == par4.dist);
+    bool ok8 = (seq.dist == par8.dist);
+
+    std::cout << std::fixed << std::setprecision(4);
+    std::cout << "\n[ЗАМІРИ ЧАСУ ВИКОНАННЯ]:\n";
+    std::cout << "1. Послідовна версія (основний потік): " << seq.totalTimeMs << " мс (1.00x)\n\n";
+
+    std::cout << "2. Паралельна версія (4 потоки):       " << par4.totalTimeMs << " мс "
+        << "(Прискорення: " << std::setprecision(2) << (par4.totalTimeMs > 0 ? seq.totalTimeMs / par4.totalTimeMs : 0.0)
+        << "x, Статус: " << (ok4 ? "OK" : "ERR") << ")\n" << std::setprecision(4);
+    for (int t = 0; t < 4; ++t) {
+        std::cout << "   • Потік " << t << ": " << par4.threadTimesMs[t] << " мс\n";
+    }
+
+    std::cout << "\n3. Паралельна версія (8 потоків):      " << par8.totalTimeMs << " мс "
+        << "(Прискорення: " << std::setprecision(2) << (par8.totalTimeMs > 0 ? seq.totalTimeMs / par8.totalTimeMs : 0.0)
+        << "x, Статус: " << (ok8 ? "OK" : "ERR") << ")\n" << std::setprecision(4);
+    for (int t = 0; t < 8; ++t) {
+        std::cout << "   • Потік " << t << ": " << par8.threadTimesMs[t] << " мс\n";
+    }
+
+    std::vector<int> negCycles;
+    for (int i = 0; i < n; ++i) {
+        if (seq.dist[i][i] < 0) negCycles.push_back(i + 1);
+    }
+    if (!negCycles.empty()) {
+        std::cout << "\n[УВАГА! ВИЯВЛЕНО ВІД'ЄМНИЙ ЦИКЛ!] Вершини: ";
+        for (size_t i = 0; i < negCycles.size(); ++i)
+            std::cout << negCycles[i] << (i + 1 < negCycles.size() ? ", " : "\n");
+    }
+
+    while (true) {
+        std::cout << "\n1. Вивести матриці D (відстаней) та Next (шляхів) для всіх пар\n";
+        std::cout << "2. Знайти найкоротший шлях для обраної пари (u -> v)\n";
+        std::cout << "0. Назад\n";
+        int sub = ReadInt("Вибір: ", 0, 2);
+        if (sub == 0) break;
+        if (sub == 1) {
+            if (n > 20) std::cout << "Матриця завелика для виведення у консоль.\n";
+            else {
+                std::cout << "\n[МАТРИЦЯ МІНІМАЛЬНИХ ВІДСТАНЕЙ D]:\n";
+                PrintCostMatrix(par4.dist);
+                std::cout << "\n[МАТРИЦЯ НАСТУПНИХ ПЕРЕХОДІВ NEXT]:\n";
+                PrintNextMatrix(par4.next);
+            }
+        }
+        else {
+            SearchPairPath(par4.dist, par4.next);
+        }
+    }
+}
+
+Matrix GetDodatok2Matrix(int id) {
+    switch (id) {
+    case 1: return { {0,INF,INF,INF,INF,INF,INF},{1,0,-1,5,INF,INF,INF},{2,4,0,3,INF,-2,6},{7,8,-4,0,INF,INF,INF},{INF,10,INF,11,0,INF,9},{12,INF,13,INF,14,0,INF},{-5,15,INF,-6,INF,16,0} };
+    case 2: return { {0,INF,1,INF,3,INF,4},{INF,0,INF,5,INF,INF,INF},{2,INF,0,INF,INF,-2,6},{7,8,INF,0,INF,INF,INF},{INF,10,INF,11,0,INF,9},{12,INF,13,INF,INF,0,INF},{-3,14,INF,-1,INF,INF,0} };
+    case 3: return { {0,INF,1,INF,15,INF,INF},{INF,0,-1,3,INF,4,INF},{2,INF,0,-2,INF,INF,6},{7,8,5,0,INF,INF,INF},{INF,10,INF,11,0,INF,9},{12,INF,13,INF,14,0,INF},{15,INF,INF,-6,INF,-3,0} };
+    case 4: return { {0,INF,1,INF,3,INF,4},{2,0,INF,5,INF,INF,INF},{-2,INF,0,INF,INF,-2,6},{INF,8,INF,0,INF,INF,INF},{INF,INF,INF,7,0,INF,9},{11,INF,12,INF,INF,0,INF},{INF,-4,INF,-1,INF,10,0} };
+    case 5: return { {0,1,2,7,INF,12,INF},{INF,0,-1,5,INF,INF,INF},{INF,INF,0,3,INF,4,6},{INF,INF,-4,0,INF,INF,INF},{INF,10,INF,11,0,INF,9},{INF,INF,13,INF,14,0,INF},{-5,15,INF,-6,INF,16,0} };
+    case 6: return { {0,2,-5,INF,INF,INF,4},{1,0,INF,5,INF,INF,INF},{3,INF,0,INF,INF,-2,6},{7,8,INF,0,INF,INF,-4},{INF,-1,INF,11,0,INF,9},{10,INF,12,INF,INF,0,INF},{-3,INF,INF,INF,INF,INF,0} };
+    case 7: return { {0,INF,INF,INF,INF,INF,INF},{INF,0,5,INF,INF,INF,INF},{2,INF,0,INF,INF,-2,6},{7,8,INF,0,INF,INF,INF},{INF,10,INF,INF,0,INF,9},{12,INF,13,INF,INF,0,INF},{-5,15,INF,-6,INF,INF,0} };
+    case 8: return { {0,INF,1,INF,3,INF,4},{INF,0,INF,INF,INF,INF,INF},{2,INF,0,INF,INF,-2,6},{7,8,INF,0,INF,INF,INF},{INF,10,INF,11,0,INF,9},{INF,INF,INF,INF,INF,0,INF},{-3,14,INF,-1,INF,INF,0} };
+    case 9: return { {0,INF,1,INF,3,INF,4},{INF,0,2,5,INF,7,INF},{INF,12,0,INF,INF,-2,6},{INF,8,INF,0,13,INF,INF},{INF,10,INF,11,0,-3,9},{INF,INF,INF,INF,INF,0,INF},{INF,14,INF,-1,INF,INF,0} };
+    default: return { {0,INF,INF,INF,3,INF,4},{INF,0,-1,INF,INF,INF,INF},{2,5,0,INF,8,-2,6},{7,INF,12,0,INF,11,INF},{INF,1,INF,10,0,INF,9},{INF,INF,INF,-4,INF,0,INF},{8,INF,-3,10,INF,INF,0} };
+    }
+}
+
+void InputCustomMatrix() {
+    int n = ReadInt("Кількість вершин N (2 - 50): ", 2, 50);
+    Matrix mat(n, std::vector<int>(n, INF));
+    std::cout << "Вводьте рядки через пробіл (для нескінченності пишіть inf):\n";
+
+    for (int i = 0; i < n; ++i) {
+        while (true) {
+            std::cout << "Рядок " << (i + 1) << ": ";
+            std::string line, tok;
+            std::getline(std::cin, line);
+            std::istringstream iss(line);
+            std::vector<std::string> tokens;
+            while (iss >> tok) tokens.push_back(tok);
+
+            if (static_cast<int>(tokens.size()) != n) {
+                std::cout << "Потрібно рівно " << n << " значень!\n";
+                continue;
+            }
+            bool ok = true;
+            for (int j = 0; j < n; ++j) {
+                std::string low = tokens[j];
+                std::transform(low.begin(), low.end(), low.begin(), ::tolower);
+                if (low == "inf" || tokens[j] == "∞") mat[i][j] = INF;
+                else {
+                    try {
+                        size_t idx = 0;
+                        int v = std::stoi(tokens[j], &idx);
+                        if (idx != tokens[j].size()) throw 1;
+                        mat[i][j] = (v >= INF / 2) ? INF : v;
+                    }
+                    catch (...) {
+                        std::cout << "Некоректне число '" << tokens[j] << "'. Повторіть рядок.\n";
+                        ok = false; break;
+                    }
+                }
+            }
+            if (ok) break;
+        }
+    }
+    RunFloydWorkflow(mat, "Користувацька матриця");
+}
+
+Matrix GenerateBenchmarkGraph(int n) {
+    Matrix mat(n, std::vector<int>(n, INF));
+    std::mt19937 gen(42);
+    std::uniform_int_distribution<int> prob(1, 100), w(1, 50);
+    for (int i = 0; i < n; ++i) {
+        mat[i][i] = 0;
+        for (int j = 0; j < n; ++j)
+            if (i != j && prob(gen) <= 40) mat[i][j] = w(gen);
+    }
+    return mat;
+}
+
+void Task2Menu() {
+    while (true) {
+        std::cout << "\n--- ЗАВДАННЯ 2: АЛГОРИТМ ФЛОЙДА-УОРШЕЛЛА (OPENMP) ---\n";
+        std::cout << "1. Тест 10 (Додаток 2 — основний варіант)\n";
+        std::cout << "2. Обрати будь-який Тест (1-10) з Додатку 2\n";
+        std::cout << "3. Ввести власну матрицю вручну\n";
+        std::cout << "4. Бенчмарк продуктивності на великому графі (N = 400 вершин)\n";
+        std::cout << "0. Назад у головне меню\n";
+
+        int ch = ReadInt("Ваш вибір: ", 0, 4);
+        if (ch == 0) break;
+        if (ch == 1) RunFloydWorkflow(GetDodatok2Matrix(10), "Додаток 2: Тест 10");
+        else if (ch == 2) {
+            int id = ReadInt("Номер тесту (1-10): ", 1, 10);
+            RunFloydWorkflow(GetDodatok2Matrix(id), "Додаток 2: Тест " + std::to_string(id));
+        }
+        else if (ch == 3) InputCustomMatrix();
+        else RunFloydWorkflow(GenerateBenchmarkGraph(400), "Бенчмарк граф (400 вершин)");
+    }
+}
+
+int main() {
+#ifdef _WIN32
+    SetConsoleCP(1251);
+    SetConsoleOutputCP(1251);
+#endif
+
+    while (true) {
+        std::cout << "\n====================================================================\n";
+        std::cout << "  ЛАБОРАТОРНА РОБОТА №3: ПАРАЛЕЛІЗАЦІЯ ОБЧИСЛЕНЬ З OPENMP (C++)\n";
+        std::cout << "  Варіант 10 | Потоки для порівняння: 4 та 8 | CPU потоків: " << omp_get_max_threads() << "\n";
+        std::cout << "====================================================================\n";
+        std::cout << "1. Завдання 1: Послідовне та паралельне обчислення полінома\n";
+        std::cout << "2. Завдання 2: Паралельний алгоритм Флойда-Уоршелла\n";
+        std::cout << "0. Вихід\n";
+        std::cout << "--------------------------------------------------------------------\n";
+
+        int choice = ReadInt("Оберіть завдання: ", 0, 2);
+        if (choice == 0) break;
+        if (choice == 1) Task1Menu();
+        else Task2Menu();
+    }
+    return 0;
+}
