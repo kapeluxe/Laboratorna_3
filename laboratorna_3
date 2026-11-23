@@ -44,11 +44,21 @@ int ReadInt(const std::string& prompt, int minVal, int maxVal) {
 // ЗАВДАННЯ 1. ОБЧИСЛЕННЯ ПОЛІНОМА (ВАРІАНТ 10, ДОДАТОК 1)
 
 inline double EvalPolyVariant10(double a) {
+    // швидкий варіант (послідовне множення):
     double a2 = a * a;
     double a3 = a2 * a;
     double a4 = a2 * a2;
     double a5 = a4 * a;
     return -0.0005 * a5 + 0.01 * a4 - 0.08 * a3 + 0.3 * a2 - 0.7 * a + 1.5;
+
+    /* Тестовий варіант зі std::pow() :
+    return -0.0005 * std::pow(a, 5)
+        + 0.01 * std::pow(a, 4)
+        - 0.08 * std::pow(a, 3)
+        + 0.3 * std::pow(a, 2)
+        - 0.7 * a
+        + 1.5;
+    */
 }
 
 double PolySequential(const std::vector<double>& A, const std::vector<double>& B, std::vector<double>& C) {
@@ -90,8 +100,9 @@ void RunPolyExperiment(int n) {
         B[i] = dist(gen);
     }
 
-    // прогрів кешу
+    // прогрів кешу та пулу потоків OpenMP
     PolySequential(A, B, C_seq);
+    PolyParallel(A, B, C_par8, 8);
 
     double tSeq = PolySequential(A, B, C_seq);
     double tPar4 = PolyParallel(A, B, C_par4, 4);
@@ -120,7 +131,9 @@ void RunPolyExperiment(int n) {
         << std::setw(16) << (std::to_string(tPar8 > 0 ? tSeq / tPar8 : 0.0).substr(0, 4) + "x")
         << (ok8 ? "OK" : "ПОМИЛКА") << "\n";
 
-    std::cout << "\nКонтрольні значення: C[0] = " << C_seq[0]
+    std::cout << "\nВхідні значення:     A[0] = " << A[0]
+        << ", A[1] = " << A[1] << ", A[2] = " << A[2] << "\n";
+    std::cout << "Контрольні значення: C[0] = " << C_seq[0]
         << ", C[1] = " << C_seq[1] << ", C[2] = " << C_seq[2] << "\n";
 }
 
@@ -147,9 +160,8 @@ void Task1Menu() {
 
 // ЗАВДАННЯ 2. ПАРАЛЕЛЬНИЙ АЛГОРИТМ ФЛОЙДА-УОРШЕЛЛА (OPENMP)
 
-
-void PrintCostMatrix(const Matrix& mat) {
-    int n = static_cast<int>(mat.size());
+void PrintSubCostMatrix(const Matrix& mat, int limit) {
+    int n = (std::min)(static_cast<int>(mat.size()), limit);
     std::cout << "      ";
     for (int j = 0; j < n; ++j) std::cout << "[" << std::setw(2) << (j + 1) << "]  ";
     std::cout << "\n";
@@ -162,6 +174,10 @@ void PrintCostMatrix(const Matrix& mat) {
         }
         std::cout << "\n";
     }
+}
+
+void PrintCostMatrix(const Matrix& mat) {
+    PrintSubCostMatrix(mat, static_cast<int>(mat.size()));
 }
 
 void PrintNextMatrix(const Matrix& next) {
@@ -305,6 +321,10 @@ void RunFloydWorkflow(const Matrix& initW, const std::string& title) {
         std::cout << "\n[Вхідна матриця відстаней W]:\n";
         PrintCostMatrix(initW);
     }
+    else {
+        std::cout << "\n[Фрагмент 10x10 початку вхідної матриці W (із " << n << "x" << n << ")]:\n";
+        PrintSubCostMatrix(initW, 10);
+    }
 
     FloydResult seq = FloydSequential(initW);
     FloydResult par4 = FloydParallel(initW, 4);
@@ -348,7 +368,10 @@ void RunFloydWorkflow(const Matrix& initW, const std::string& title) {
         int sub = ReadInt("Вибір: ", 0, 2);
         if (sub == 0) break;
         if (sub == 1) {
-            if (n > 20) std::cout << "Матриця завелика для виведення у консоль.\n";
+            if (n > 20) {
+                std::cout << "\nМатриця завелика для повного виводу. Фрагмент 10x10 матриці найкоротших відстаней D:\n";
+                PrintSubCostMatrix(par4.dist, 10);
+            }
             else {
                 std::cout << "\n[МАТРИЦЯ МІНІМАЛЬНИХ ВІДСТАНЕЙ D]:\n";
                 PrintCostMatrix(par4.dist);
